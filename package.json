@@ -1,0 +1,12 @@
+{
+  "name": "keystone",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": ["apps/*", "packages/*"],
+  "scripts": {
+    "dev:pilot": "npm run dev -w apps/pm-pilot",
+    "build:pilot": "npm run build -w apps/pm-pilot",
+    "sync": "npm run sync -w apps/context-engine",
+    "inspect": "npm run inspect -w apps/context-engine"
+  }
+}

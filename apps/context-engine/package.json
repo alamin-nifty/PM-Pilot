@@ -1,0 +1,15 @@
+{
+  "name": "keystone-context-engine",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "sync": "tsx --env-file=.env src/sync.ts",
+    "inspect": "tsx --env-file=.env src/inspect.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3"
+  }
+}
