@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "sync": "tsx --env-file=.env src/sync.ts",
-    "inspect": "tsx --env-file=.env src/inspect.ts"
+    "inspect": "tsx --env-file=.env src/inspect.ts",
+    "check-slack": "tsx --env-file=.env src/check-slack.ts"
   },
   "devDependencies": {
     "@types/node": "^20.14.0",

@@ -1,6 +1,7 @@
 import { getAgenda, allTasks, recentItems, person } from "@/lib/agenda";
 import { getTeamKpis, type KpiRow } from "@/lib/kpi";
 import AskBrain from "./AskBrain";
+import Link from "next/link";
 
 function KpiCard({ row }: { row: KpiRow }) {
   return (
@@ -33,6 +34,7 @@ export default function Dashboard() {
           <p className="date">{agenda.date}</p>
           <span className="spacer" />
           <AskBrain />
+          <Link href="/settings" className="settings-gear" title="Settings">⚙</Link>
         </div>
       </header>
 
