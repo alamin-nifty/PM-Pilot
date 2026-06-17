@@ -73,12 +73,15 @@ export async function GET() {
 export async function POST(req: Request) {
   const body = await req.json();
 
-  // Save connection tokens
+  // Save connection tokens — only overwrite if the incoming value is non-empty
   if (body.connections) {
-    db_setConfig.run({ key: "slack.botToken",    value: body.connections.slack?.botToken    ?? "" });
-    db_setConfig.run({ key: "slack.channelIds",  value: body.connections.slack?.channelIds  ?? "" });
-    db_setConfig.run({ key: "clickup.apiToken",  value: body.connections.clickup?.apiToken  ?? "" });
-    db_setConfig.run({ key: "clickup.listId",    value: body.connections.clickup?.listId    ?? "" });
+    const set = (key: string, val: string | undefined) => {
+      if (val && val.trim()) db_setConfig.run({ key, value: val.trim() });
+    };
+    set("slack.botToken",    body.connections.slack?.botToken);
+    set("slack.channelIds",  body.connections.slack?.channelIds);
+    set("clickup.apiToken",  body.connections.clickup?.apiToken);
+    set("clickup.listId",    body.connections.clickup?.listId);
     syncEngineEnv();
   }
 
