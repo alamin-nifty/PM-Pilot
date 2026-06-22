@@ -6,6 +6,8 @@
  * Run: npm run check-slack
  */
 
+export {}; // mark as a module so top-level await is allowed (TS 6)
+
 const token = process.env.SLACK_BOT_TOKEN?.trim();
 const channelIds = (process.env.SLACK_CHANNEL_IDS ?? "")
   .split(",")

@@ -35,6 +35,7 @@ function getConnections() {
     },
     clickup: {
       apiToken: db_getConfig("clickup.apiToken"),
+      folderId: db_getConfig("clickup.folderId"),
       listId: db_getConfig("clickup.listId"),
     },
   };
@@ -45,6 +46,7 @@ function syncEngineEnv() {
     `SLACK_BOT_TOKEN=${db_getConfig("slack.botToken")}`,
     `SLACK_CHANNEL_IDS=${db_getConfig("slack.channelIds")}`,
     `CLICKUP_API_TOKEN=${db_getConfig("clickup.apiToken")}`,
+    `CLICKUP_FOLDER_ID=${db_getConfig("clickup.folderId")}`,
     `CLICKUP_LIST_ID=${db_getConfig("clickup.listId")}`,
     `USE_FIXTURES=false`,
   ];
@@ -81,6 +83,7 @@ export async function POST(req: Request) {
     set("slack.botToken",    body.connections.slack?.botToken);
     set("slack.channelIds",  body.connections.slack?.channelIds);
     set("clickup.apiToken",  body.connections.clickup?.apiToken);
+    set("clickup.folderId",  body.connections.clickup?.folderId);
     set("clickup.listId",    body.connections.clickup?.listId);
     syncEngineEnv();
   }

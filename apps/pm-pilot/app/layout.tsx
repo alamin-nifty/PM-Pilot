@@ -8,7 +8,11 @@ export const metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      {/* suppressHydrationWarning: browser extensions (e.g. ColorZilla adds
+          `cz-shortcut-listen`, Grammarly, etc.) inject attributes onto <body>
+          before React hydrates. This silences that benign mismatch only for
+          <body>'s own attributes — it does not affect app content. */}
+      <body suppressHydrationWarning>{children}</body>
     </html>
   );
 }

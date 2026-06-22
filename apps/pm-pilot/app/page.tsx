@@ -34,6 +34,7 @@ export default function Dashboard() {
           <p className="date">{agenda.date}</p>
           <span className="spacer" />
           <AskBrain />
+          <Link href="/kpi" className="kpi-nav" title="KPI Builder">KPI ↗</Link>
           <Link href="/settings" className="settings-gear" title="Settings">⚙</Link>
         </div>
       </header>

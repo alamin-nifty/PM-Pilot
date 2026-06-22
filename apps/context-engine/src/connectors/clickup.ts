@@ -11,13 +11,25 @@ import { detectTaskLinks, type ConnectorResult, type Item, type Task } from "../
 // ---- ClickUp API types ----
 
 interface CUAssignee { id: number; username: string }
-interface CUStatus  { status: string }
+interface CUStatus  { status: string; type?: string } // type: "closed"|"done"|"open"|...
+interface CUTag     { name: string }
+interface CUPriority { priority: string } // "urgent"|"high"|"normal"|"low"
+interface CURef     { id: string; name: string }
 interface CUTask {
   id: string;
   name: string;
   status: CUStatus;
   assignees: CUAssignee[];
   date_updated: string; // ms epoch string
+  date_created?: string; // ms epoch string
+  date_closed?: string | null; // ms epoch string
+  due_date?: string | null; // ms epoch string
+  start_date?: string | null; // ms epoch string
+  tags?: CUTag[];
+  priority?: CUPriority | null;
+  list?: CURef;
+  folder?: CURef;
+  space?: CURef;
   url: string;
 }
 interface CUComment {
@@ -64,16 +76,34 @@ async function fetchComments(token: string, taskId: string): Promise<CUComment[]
 
 // ---- normalisation ----
 
+// ClickUp gives ms-epoch strings; turn one into ISO (or null/undefined cleanly).
+function msToIso(ms: string | null | undefined): string | undefined {
+  if (ms == null || ms === "") return undefined;
+  const n = Number(ms);
+  return Number.isFinite(n) ? new Date(n).toISOString() : undefined;
+}
+
 function normalizeTask(t: CUTask): Task {
+  const assigneeIds = (t.assignees ?? []).map((a) => `clickup:${a.id}`);
+  // A task is "closed" when ClickUp marks its status type as closed/done.
+  const closedByType = t.status?.type === "closed" || t.status?.type === "done";
   return {
     id: t.id,
     source: "clickup",
     title: t.name,
     status: t.status?.status ?? "open",
-    assigneeId: t.assignees?.[0] ? `clickup:${t.assignees[0].id}` : null,
+    assigneeId: assigneeIds[0] ?? null,
     linkedItemIds: [],
     updatedAt: new Date(Number(t.date_updated)).toISOString(),
     rawRef: t.url,
+    assigneeIds,
+    createdAt: msToIso(t.date_created),
+    closedAt: msToIso(t.date_closed) ?? (closedByType ? new Date(Number(t.date_updated)).toISOString() : null),
+    dueDate: msToIso(t.due_date) ?? null,
+    startDate: msToIso(t.start_date) ?? null,
+    tags: (t.tags ?? []).map((tag) => tag.name.toLowerCase()),
+    priority: t.priority?.priority ?? null,
+    area: t.list?.name ?? t.folder?.name ?? t.space?.name ?? null,
   };
 }
 
@@ -95,6 +125,10 @@ function normalizeComment(c: CUComment, taskId: string): Item {
 interface FixtureTask {
   id: string; title: string; status: string;
   assigneeClickupId?: string; updatedAt: string;
+  // Phase 2/3 fields, so fixture mode exercises the full metric set.
+  createdAt?: string; closedAt?: string | null; dueDate?: string | null;
+  tags?: string[]; area?: string | null;
+  statusHistory?: { status: string; at: string }[];
   comments?: { id: string; authorClickupId: string; text: string; at: string }[];
 }
 
@@ -102,15 +136,45 @@ const MOCK_TASKS: FixtureTask[] = [
   {
     id: "CU-47", title: "Login flow — account lockout", status: "blocked",
     assigneeClickupId: "202", updatedAt: "2026-06-03T09:00:00Z",
+    createdAt: "2026-05-28T09:00:00Z", tags: ["bug"], area: "Auth",
+    statusHistory: [
+      { status: "open", at: "2026-05-28T09:00:00Z" },
+      { status: "blocked", at: "2026-06-03T09:00:00Z" },
+    ],
     comments: [{ id: "c1", authorClickupId: "202", text: "Blocked — need product to confirm lockout threshold.", at: "2026-06-03T09:05:00Z" }],
   },
   {
     id: "CU-61", title: "Payment refunds", status: "in_review",
     assigneeClickupId: "201", updatedAt: "2026-06-02T14:00:00Z",
+    createdAt: "2026-05-30T10:00:00Z", dueDate: "2026-06-05T00:00:00Z", area: "Payments",
+    statusHistory: [
+      { status: "open", at: "2026-05-30T10:00:00Z" },
+      { status: "in_review", at: "2026-06-02T14:00:00Z" },
+    ],
   },
   {
     id: "CU-2", title: "Project setup", status: "done",
     assigneeClickupId: "201", updatedAt: "2026-05-10T10:00:00Z",
+    createdAt: "2026-05-08T10:00:00Z", closedAt: "2026-05-10T10:00:00Z",
+    dueDate: "2026-05-12T00:00:00Z", area: "Platform",
+    statusHistory: [
+      { status: "open", at: "2026-05-08T10:00:00Z" },
+      { status: "done", at: "2026-05-10T10:00:00Z" },
+    ],
+  },
+  {
+    id: "CU-88", title: "Checkout total rounding bug", status: "done",
+    assigneeClickupId: "202", updatedAt: "2026-06-10T16:00:00Z",
+    createdAt: "2026-06-06T09:00:00Z", closedAt: "2026-06-10T16:00:00Z",
+    dueDate: "2026-06-09T00:00:00Z", tags: ["bug"], area: "Payments",
+    // reopened once before final done — exercises reopen rate + verify time
+    statusHistory: [
+      { status: "open", at: "2026-06-06T09:00:00Z" },
+      { status: "in_review", at: "2026-06-08T11:00:00Z" },
+      { status: "done", at: "2026-06-08T15:00:00Z" },
+      { status: "in_progress", at: "2026-06-09T09:00:00Z" },
+      { status: "done", at: "2026-06-10T16:00:00Z" },
+    ],
   },
 ];
 
@@ -120,8 +184,14 @@ function normalizeFixtureTask(f: FixtureTask): { task: Task; items: Item[] } {
     : null;
   const task: Task = {
     id: f.id, source: "clickup", title: f.title, status: f.status,
-    assigneeId, linkedItemIds: [],
+    assigneeId, assigneeIds: assigneeId ? [assigneeId] : [], linkedItemIds: [],
     updatedAt: f.updatedAt,
+    createdAt: f.createdAt,
+    closedAt: f.closedAt ?? null,
+    dueDate: f.dueDate ?? null,
+    tags: f.tags ?? [],
+    area: f.area ?? null,
+    statusHistory: f.statusHistory,
     rawRef: `https://app.clickup.com/t/${f.id}`,
   };
   const items: Item[] = (f.comments ?? []).map((c) => ({
@@ -162,6 +232,12 @@ export function clickupConnector(): Connector {
       }
 
       // real path
+      // Phase 2 fields (created/closed/due dates, tags, priority, list/area) come
+      // back on the list-task endpoint, so normalizeTask() populates them directly.
+      // Phase 3 `statusHistory` is NOT exposed by the ClickUp v2 list endpoint — a
+      // full transition log needs webhooks (taskStatusUpdated) accumulated over time,
+      // or the limited time-in-status endpoint. Until that's wired, statusHistory is
+      // left undefined and reopen-rate / verify-time stay in the deferred footnote.
       const rawTasks = await fetchAllTasks(token, listId);
       const tasks: Task[] = [];
       const items: Item[] = [];

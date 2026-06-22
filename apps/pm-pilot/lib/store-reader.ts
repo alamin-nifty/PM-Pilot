@@ -18,6 +18,10 @@ interface RawStore {
   tasks: Record<string, {
     id: string; source: string; title: string; status: string;
     assigneeId: string | null; updatedAt: string; rawRef: string;
+    assigneeIds?: string[]; createdAt?: string; closedAt?: string | null;
+    dueDate?: string | null; startDate?: string | null; tags?: string[];
+    priority?: string | null; area?: string | null;
+    statusHistory?: { status: string; at: string }[];
   }>;
   items: Record<string, {
     id: string; source: string; type: string; authorId: string;
@@ -61,6 +65,15 @@ function readRealData(): AppData | null {
       status: t.status as TaskStatus,
       assigneeId: t.assigneeId ?? null,
       updatedAt: t.updatedAt,
+      assigneeIds: t.assigneeIds,
+      createdAt: t.createdAt,
+      closedAt: t.closedAt,
+      dueDate: t.dueDate,
+      startDate: t.startDate,
+      tags: t.tags,
+      priority: t.priority,
+      area: t.area,
+      statusHistory: t.statusHistory,
     }));
 
     const items: Item[] = Object.values(store.items ?? {})

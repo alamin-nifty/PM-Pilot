@@ -7,7 +7,12 @@ type Role = "client" | "qa" | "developer" | "pm" | "";
 
 interface Connections {
   slack: { botToken: string; channelIds: string };
-  clickup: { apiToken: string; listId: string };
+  clickup: { apiToken: string; folderId: string; listId: string };
+}
+
+interface SprintList {
+  id: string;
+  name: string;
 }
 
 interface PersonRow {
@@ -30,8 +35,11 @@ async function patch(body: object) {
 export default function SettingsPage() {
   const [connections, setConnections] = useState<Connections>({
     slack: { botToken: "", channelIds: "" },
-    clickup: { apiToken: "", listId: "" },
+    clickup: { apiToken: "", folderId: "", listId: "" },
   });
+  const [sprintLists, setSprintLists] = useState<SprintList[]>([]);
+  const [loadingLists, setLoadingLists] = useState(false);
+  const [listsError, setListsError] = useState("");
   const [people, setPeople] = useState<PersonRow[]>([]);
   const [filter, setFilter] = useState("");
   const [showHidden, setShowHidden] = useState(false);
@@ -67,6 +75,23 @@ export default function SettingsPage() {
     setConnections((c) => ({ ...c, clickup: { ...c.clickup, [k]: v } }));
     setConnDirty(true);
   };
+
+  async function loadSprints() {
+    setLoadingLists(true);
+    setListsError("");
+    try {
+      const folderId = connections.clickup.folderId.trim();
+      if (!folderId) { setListsError("Enter a folder ID first."); return; }
+      const r = await fetch(`/api/clickup/lists?folderId=${folderId}`);
+      const data = await r.json();
+      if (data.error) throw new Error(data.error);
+      setSprintLists(data.lists ?? []);
+    } catch (e: any) {
+      setListsError(e.message);
+    } finally {
+      setLoadingLists(false);
+    }
+  }
 
   async function saveConnections() {
     setConnSaving(true);
@@ -185,17 +210,51 @@ export default function SettingsPage() {
                 value={connections.clickup.apiToken}
                 onChange={(e) => setClickup("apiToken", e.target.value)}
               />
-              <small>Settings → Apps → API token in ClickUp.</small>
+              <small>ClickUp → profile avatar → Settings → Apps → API token.</small>
             </label>
             <label className="settings-field">
-              <span>Sprint list ID</span>
+              <span>Folder ID</span>
               <input
                 type="text"
-                placeholder="901702046786"
-                value={connections.clickup.listId}
-                onChange={(e) => setClickup("listId", e.target.value)}
+                placeholder="e.g. 12345678"
+                value={connections.clickup.folderId}
+                onChange={(e) => setClickup("folderId", e.target.value)}
               />
+              <small>Right-click your sprints folder in ClickUp → Copy link → the number in the URL.</small>
             </label>
+            <div className="settings-field">
+              <span>Current sprint</span>
+              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <select
+                  className="people-role-select"
+                  style={{ flex: 1, padding: "9px 10px", fontSize: 14 }}
+                  value={connections.clickup.listId}
+                  onChange={(e) => setClickup("listId", e.target.value)}
+                  disabled={sprintLists.length === 0}
+                >
+                  {sprintLists.length === 0 ? (
+                    <option value="">{connections.clickup.listId || "— load sprints first —"}</option>
+                  ) : (
+                    <>
+                      <option value="">— select sprint —</option>
+                      {sprintLists.map((l) => (
+                        <option key={l.id} value={l.id}>{l.name}</option>
+                      ))}
+                    </>
+                  )}
+                </select>
+                <button
+                  className="btn-secondary"
+                  style={{ whiteSpace: "nowrap" }}
+                  onClick={loadSprints}
+                  disabled={loadingLists}
+                >
+                  {loadingLists ? "Loading…" : "Load sprints"}
+                </button>
+              </div>
+              {listsError && <small style={{ color: "var(--blocked)" }}>{listsError}</small>}
+              <small>Save connections first, then load sprints to pick the active one.</small>
+            </div>
           </div>
 
           {connDirty && (

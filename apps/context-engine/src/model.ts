@@ -45,10 +45,21 @@ export interface Task {
   source: Source;
   title: string;
   status: TaskStatus;
-  assigneeId: string | null; // → Person.id
+  assigneeId: string | null; // → Person.id (primary assignee)
   linkedItemIds: string[];
   updatedAt: string; // ISO
   rawRef: string;
+  // --- optional richer fields (Phase 2; absent on Slack/older syncs) ---
+  assigneeIds?: string[]; // all assignees → Person.id
+  createdAt?: string; // ISO
+  closedAt?: string | null; // ISO, when moved to a closed/done status
+  dueDate?: string | null; // ISO
+  startDate?: string | null; // ISO
+  tags?: string[]; // ClickUp tag names (lowercased)
+  priority?: string | null; // "urgent" | "high" | "normal" | "low"
+  area?: string | null; // ClickUp list/folder/space name — the "where"
+  // --- Phase 3: status transition log, oldest → newest ---
+  statusHistory?: { status: string; at: string }[]; // { status, ISO time }
 }
 
 export interface ConnectorResult {

@@ -13,6 +13,16 @@ export interface Item {
 export interface Task {
   id: string; title: string; status: TaskStatus;
   assigneeId: string | null; updatedAt: string;
+  // optional richer fields (present once ClickUp Phase 2/3 sync runs)
+  assigneeIds?: string[];
+  createdAt?: string;
+  closedAt?: string | null;
+  dueDate?: string | null;
+  startDate?: string | null;
+  tags?: string[];
+  priority?: string | null;
+  area?: string | null;
+  statusHistory?: { status: string; at: string }[];
 }
 
 export const PEOPLE: Record<string, Person> = {

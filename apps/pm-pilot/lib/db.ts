@@ -20,6 +20,16 @@ db.exec(`
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL DEFAULT ''
   );
+
+  -- Manual, PM-entered KPI inputs (the "your call" side of the hybrid model):
+  -- one value per (person, metric). e.g. metric_key='communication'.
+  CREATE TABLE IF NOT EXISTS kpi_input (
+    person_id   TEXT NOT NULL,
+    metric_key  TEXT NOT NULL,
+    value       TEXT NOT NULL DEFAULT '',
+    updated_at  TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (person_id, metric_key)
+  );
 `);
 
 // ---- person_config helpers ----
@@ -73,6 +83,26 @@ export const db_getConfig = (key: string) =>
 
 export const db_setConfig = db.prepare<{ key: string; value: string }>(
   "INSERT INTO app_config (key, value) VALUES (@key, @value) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+);
+
+// ---- manual KPI input helpers (hybrid model) ----
+
+export interface KpiInputRow { person_id: string; metric_key: string; value: string; }
+
+export const db_getKpiInputs = () =>
+  db.prepare("SELECT person_id, metric_key, value FROM kpi_input").all() as KpiInputRow[];
+
+export const db_setKpiInput = db.prepare<{
+  person_id: string; metric_key: string; value: string; updated_at: string;
+}>(`
+  INSERT INTO kpi_input (person_id, metric_key, value, updated_at)
+  VALUES (@person_id, @metric_key, @value, @updated_at)
+  ON CONFLICT(person_id, metric_key) DO UPDATE SET
+    value = excluded.value, updated_at = excluded.updated_at
+`);
+
+export const db_delKpiInput = db.prepare<{ person_id: string; metric_key: string }>(
+  "DELETE FROM kpi_input WHERE person_id = @person_id AND metric_key = @metric_key",
 );
 
 export default db;
