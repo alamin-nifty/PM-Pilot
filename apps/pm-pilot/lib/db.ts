@@ -1,108 +1,79 @@
-import Database from "better-sqlite3";
-import { join } from "path";
-import { mkdirSync } from "fs";
+import { MongoClient, type Db, type Collection } from "mongodb";
 
-const DATA_DIR = join(process.cwd(), "data");
-mkdirSync(DATA_DIR, { recursive: true });
+// One MongoClient, reused across requests and HMR reloads (avoids connection storms).
+// Prod + dev both use MONGODB_URI (a MongoDB Atlas connection string).
+const uri = process.env.MONGODB_URI ?? "";
+const dbName = process.env.MONGODB_DB || "pmpilot";
 
-const db = new Database(join(DATA_DIR, "keystone.db"));
-db.pragma("journal_mode = WAL"); // safe concurrent reads
-
-db.exec(`
-  CREATE TABLE IF NOT EXISTS person_config (
-    id      TEXT PRIMARY KEY,
-    name    TEXT NOT NULL,
-    role    TEXT NOT NULL DEFAULT '',
-    hidden  INTEGER NOT NULL DEFAULT 0
-  );
-
-  CREATE TABLE IF NOT EXISTS app_config (
-    key   TEXT PRIMARY KEY,
-    value TEXT NOT NULL DEFAULT ''
-  );
-
-  -- Manual, PM-entered KPI inputs (the "your call" side of the hybrid model):
-  -- one value per (person, metric). e.g. metric_key='communication'.
-  CREATE TABLE IF NOT EXISTS kpi_input (
-    person_id   TEXT NOT NULL,
-    metric_key  TEXT NOT NULL,
-    value       TEXT NOT NULL DEFAULT '',
-    updated_at  TEXT NOT NULL DEFAULT '',
-    PRIMARY KEY (person_id, metric_key)
-  );
-`);
-
-// ---- person_config helpers ----
-
-export interface PersonRow {
-  id: string;
-  name: string;
-  role: string;
-  hidden: number; // 0 | 1
+const g = globalThis as unknown as { __mongo?: MongoClient };
+function database(): Db {
+  if (!uri) throw new Error("MONGODB_URI is not set — add it to apps/pm-pilot/.env.local");
+  if (!g.__mongo) g.__mongo = new MongoClient(uri); // driver connects lazily on first op
+  return g.__mongo.db(dbName);
 }
 
-export const db_getPeople = () =>
-  db.prepare("SELECT * FROM person_config ORDER BY name").all() as PersonRow[];
+// ---- document shapes (Mongo is schemaless; these are our conventions) ----
+interface PeopleDoc { _id: string; name: string; role: string; hidden: number; }
+interface ScoreDoc { personId: string; indexKey: string; week: string; value: number; updatedAt: string; updatedBy: string; }
+interface UserDoc { _id?: unknown; username: string; passwordHash: string; displayName: string; }
 
-export const db_upsertPerson = db.prepare<PersonRow>(`
-  INSERT INTO person_config (id, name, role, hidden)
-  VALUES (@id, @name, @role, @hidden)
-  ON CONFLICT(id) DO UPDATE SET
-    name   = excluded.name,
-    role   = excluded.role,
-    hidden = excluded.hidden
-`);
+const people = (): Collection<PeopleDoc> => database().collection<PeopleDoc>("people");
+const scores = (): Collection<ScoreDoc> => database().collection<ScoreDoc>("scores");
+const users = (): Collection<UserDoc> => database().collection<UserDoc>("users");
 
-export const db_setRole = db.prepare<{ id: string; role: string }>(
-  "UPDATE person_config SET role = @role WHERE id = @id",
-);
+// ---- API shapes returned to the app (kept identical to the old SQLite layer) ----
+export interface PersonRow { id: string; name: string; role: string; hidden: number; }
+export interface ScoreRow { person_id: string; index_key: string; value: number; }
+export interface UserRow { id: string; username: string; password_hash: string; display_name: string; }
 
-export const db_setHidden = db.prepare<{ id: string; hidden: number }>(
-  "UPDATE person_config SET hidden = @hidden WHERE id = @id",
-);
+// ---- people (the `people` collection = source of truth for the team) ----
 
-// Bulk-sync people from the context store (preserves existing role/hidden)
-export function syncPeopleFromStore(
-  storePeople: { id: string; name: string }[],
-) {
-  const upsert = db.prepare<{ id: string; name: string }>(`
-    INSERT INTO person_config (id, name, role, hidden)
-    VALUES (@id, @name, '', 0)
-    ON CONFLICT(id) DO UPDATE SET name = excluded.name
-  `);
-  const run = db.transaction((people: { id: string; name: string }[]) => {
-    for (const p of people) upsert.run(p);
-  });
-  run(storePeople);
+export async function db_getPeople(): Promise<PersonRow[]> {
+  const docs = await people().find({}).sort({ name: 1 }).toArray();
+  return docs.map((d) => ({ id: d._id, name: d.name, role: d.role ?? "", hidden: d.hidden ?? 0 }));
 }
 
-// ---- app_config helpers ----
+export async function db_createPerson(p: { id: string; name: string; role: string }): Promise<void> {
+  await people().updateOne(
+    { _id: p.id },
+    { $setOnInsert: { name: p.name, role: p.role, hidden: 0 } },
+    { upsert: true },
+  );
+}
 
-export const db_getConfig = (key: string) =>
-  (db.prepare("SELECT value FROM app_config WHERE key = ?").get(key) as { value: string } | undefined)?.value ?? "";
+export async function db_setRole(id: string, role: string): Promise<void> {
+  await people().updateOne({ _id: id }, { $set: { role } });
+}
 
-export const db_setConfig = db.prepare<{ key: string; value: string }>(
-  "INSERT INTO app_config (key, value) VALUES (@key, @value) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-);
+export async function db_setHidden(id: string, hidden: number): Promise<void> {
+  await people().updateOne({ _id: id }, { $set: { hidden } });
+}
 
-// ---- manual KPI input helpers (hybrid model) ----
+// ---- weekly scores (`scores` collection, unique on personId+indexKey+week) ----
 
-export interface KpiInputRow { person_id: string; metric_key: string; value: string; }
+export async function db_getScores(week: string): Promise<ScoreRow[]> {
+  const docs = await scores().find({ week }).toArray();
+  return docs.map((d) => ({ person_id: d.personId, index_key: d.indexKey, value: d.value }));
+}
 
-export const db_getKpiInputs = () =>
-  db.prepare("SELECT person_id, metric_key, value FROM kpi_input").all() as KpiInputRow[];
+export async function db_setScore(s: {
+  person_id: string; index_key: string; week: string; value: number; updated_at: string; updated_by: string;
+}): Promise<void> {
+  await scores().updateOne(
+    { personId: s.person_id, indexKey: s.index_key, week: s.week },
+    { $set: { value: s.value, updatedAt: s.updated_at, updatedBy: s.updated_by } },
+    { upsert: true },
+  );
+}
 
-export const db_setKpiInput = db.prepare<{
-  person_id: string; metric_key: string; value: string; updated_at: string;
-}>(`
-  INSERT INTO kpi_input (person_id, metric_key, value, updated_at)
-  VALUES (@person_id, @metric_key, @value, @updated_at)
-  ON CONFLICT(person_id, metric_key) DO UPDATE SET
-    value = excluded.value, updated_at = excluded.updated_at
-`);
+export async function db_delScore(s: { person_id: string; index_key: string; week: string }): Promise<void> {
+  await scores().deleteOne({ personId: s.person_id, indexKey: s.index_key, week: s.week });
+}
 
-export const db_delKpiInput = db.prepare<{ person_id: string; metric_key: string }>(
-  "DELETE FROM kpi_input WHERE person_id = @person_id AND metric_key = @metric_key",
-);
+// ---- users (auth) ----
 
-export default db;
+export async function db_getUserByUsername(username: string): Promise<UserRow | null> {
+  const d = await users().findOne({ username });
+  if (!d) return null;
+  return { id: String(d._id), username: d.username, password_hash: d.passwordHash, display_name: d.displayName ?? "" };
+}
